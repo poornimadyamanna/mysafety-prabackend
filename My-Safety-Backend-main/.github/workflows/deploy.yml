@@ -1,27 +1,106 @@
-
-name: MySafety Backend CI
+name: MySafety Backend CI/CD
 
 on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
+    paths:
+      - "My-Safety-Backend-main/**"
+      - ".github/workflows/backend-cicd.yml"
+
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: mysafety-backend-production
+  cancel-in-progress: false
+
 jobs:
   build:
+    name: Build backend
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: My-Safety-Backend-main
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Build MySafety backend
-        working-directory: ./My-Safety-Backend-main
+      - name: Configure Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: My-Safety-Backend-main/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compile TypeScript
+        run: npm run build
+
+  deploy:
+    name: Deploy backend to EC2
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Configure SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
         run: |
-          docker build -t mysafety-backend:ci .
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" | tr -d '\r' > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Deploy backend
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        run: |
+          ssh -o BatchMode=yes "$EC2_USER@$EC2_HOST" 'bash -s' <<'REMOTE'
+          set -euo pipefail
+
+          REPOSITORY="/home/ubuntu/mysafety-prabackend"
+          APPLICATION="$REPOSITORY/My-Safety-Backend-main"
+
+          cd "$REPOSITORY"
+
+          if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+            echo "Deployment stopped: server repository has uncommitted tracked changes."
+            exit 1
+          fi
+
+          git pull --ff-only origin main
+
+          cd "$APPLICATION"
+
+          sudo docker compose build mysafety-backend
+          sudo docker compose up -d --no-deps mysafety-backend
+
+          for attempt in $(seq 1 12); do
+            STATUS=$(sudo docker inspect \
+              --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
+              mysafety-backend)
+
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Backend deployment completed successfully."
+              exit 0
+            fi
+
+            echo "Waiting for backend health check: $STATUS"
+            sleep 5
+          done
+
+          echo "Backend did not become healthy."
+          sudo docker logs --tail 100 mysafety-backend
+          exit 1
+          REMOTE
