@@ -62,7 +62,7 @@ jobs:
             echo '::error::EC2_SSH_KEY is not a readable, unencrypted SSH private key.'
             exit 1
           }
-               - name: Verify SSH host configuration
+      - name: Verify SSH host configuration
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
         run: |
