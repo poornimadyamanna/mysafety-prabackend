@@ -12,3 +12,5 @@ new line added by indosakura.
 this is mysafety project i am doing, and this is my project
 i want to check wheather its working or not.
 
+
+Toady i am completed github action, and its working properly so no need to create codepipeline i am learning its completed now.
