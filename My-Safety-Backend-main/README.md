@@ -14,3 +14,6 @@ i want to check wheather its working or not.
 
 
 Toady i am completed github action, and its working properly so no need to create codepipeline i am learning its completed now.
+
+hi, today is monday and everything is going smoothhly, good and fair enough.
+and friday is last day to some people that'all.
